@@ -3360,6 +3360,10 @@ nvm() {
             shift
           ;;
           --save | -w)
+            if [ $NVM_WRITE_TO_NVMRC -eq 1 ]; then
+              nvm_err '--save and -w may only be provided once'
+              return 6
+            fi
             NVM_WRITE_TO_NVMRC=1
             shift
           ;;
@@ -3509,6 +3513,11 @@ nvm() {
           nvm_ensure_default_set "lts/${LTS}"
         else
           nvm_ensure_default_set "${provided_version}"
+        fi
+
+        if [ $NVM_WRITE_TO_NVMRC -eq 1 ]; then
+          nvm_write_nvmrc "${VERSION}"
+          EXIT_CODE=$?
         fi
 
         if [ $EXIT_CODE -ne 0 ] && [ -n "${ALIAS-}" ]; then
@@ -3746,6 +3755,8 @@ nvm() {
       local NVM_LTS
       local IS_VERSION_FROM_NVMRC
       IS_VERSION_FROM_NVMRC=0
+      local NVM_WRITE_TO_NVMRC
+      NVM_WRITE_TO_NVMRC=0
 
       while [ $# -ne 0 ]; do
         case "$1" in
@@ -3757,7 +3768,13 @@ nvm() {
           --) ;;
           --lts) NVM_LTS='*' ;;
           --lts=*) NVM_LTS="${1##--lts=}" ;;
-          --save | -w) NVM_WRITE_TO_NVMRC=1 ;;
+          --save | -w)
+            if [ $NVM_WRITE_TO_NVMRC -eq 1 ]; then
+              nvm_err '--save and -w may only be provided once'
+              return 6
+            fi
+            NVM_WRITE_TO_NVMRC=1
+          ;;
           --*) ;;
           *)
             if [ -n "${1-}" ]; then
@@ -3791,8 +3808,8 @@ nvm() {
         return 127
       fi
 
-      if [ "${NVM_WRITE_TO_NVMRC:-0}" -eq 1 ]; then
-        nvm_write_nvmrc "$VERSION"
+      if [ $NVM_WRITE_TO_NVMRC -eq 1 ]; then
+        nvm_write_nvmrc "${VERSION}"
       fi
 
       if [ "_${VERSION}" = '_system' ]; then
@@ -4539,31 +4556,41 @@ nvm_supports_xz() {
 nvm_auto() {
   local NVM_MODE
   NVM_MODE="${1-}"
-  local VERSION
-  local NVM_CURRENT
-  if [ "_${NVM_MODE}" = '_install' ]; then
-    VERSION="$(nvm_alias default 2>/dev/null || nvm_echo)"
-    if [ -n "${VERSION}" ] && ! [ "_${VERSION}" = '_N/A' ] && nvm_is_valid_version "${VERSION}"; then
-      nvm install "${VERSION}" >/dev/null
-    elif nvm_rc_version >/dev/null 2>&1; then
-      nvm install >/dev/null
-    fi
-  elif [ "_$NVM_MODE" = '_use' ]; then
-    NVM_CURRENT="$(nvm_ls_current)"
-    if [ "_${NVM_CURRENT}" = '_none' ] || [ "_${NVM_CURRENT}" = '_system' ]; then
-      VERSION="$(nvm_resolve_local_alias default 2>/dev/null || nvm_echo)"
-      if [ -n "${VERSION}" ] && ! [ "_${VERSION}" = '_N/A' ] && nvm_is_valid_version "${VERSION}"; then
-        nvm use --silent "${VERSION}" >/dev/null
-      elif nvm_rc_version >/dev/null 2>&1; then
-        nvm use --silent >/dev/null
+
+  case "${NVM_MODE}" in
+    none) return 0 ;;
+    use | install)
+      local VERSION
+      local NVM_CURRENT
+      NVM_CURRENT="$(nvm_ls_current)"
+      if [ "_${NVM_CURRENT}" = '_none' ] || [ "_${NVM_CURRENT}" = '_system' ]; then
+        VERSION="$(nvm_resolve_local_alias default 2>/dev/null || nvm_echo)"
+        if [ -n "${VERSION}" ]; then
+          if [ "_${VERSION}" != '_N/A' ] && nvm_is_valid_version "${VERSION}"; then
+            if [ "_${NVM_MODE}" = '_install' ]; then
+              nvm install "${VERSION}" >/dev/null
+            else
+              nvm use --silent "${VERSION}" >/dev/null
+            fi
+          else
+            return 0
+          fi
+        elif nvm_rc_version >/dev/null 2>&1; then
+          if [ "_${NVM_MODE}" = '_install' ]; then
+            nvm install >/dev/null
+          else
+            nvm use --silent >/dev/null
+          fi
+        fi
+      else
+        nvm use --silent "${NVM_CURRENT}" >/dev/null
       fi
-    else
-      nvm use --silent "${NVM_CURRENT}" >/dev/null
-    fi
-  elif [ "_${NVM_MODE}" != '_none' ]; then
-    nvm_err 'Invalid auto mode supplied.'
-    return 1
-  fi
+    ;;
+    *)
+      nvm_err 'Invalid auto mode supplied.'
+      return 1
+    ;;
+  esac
 }
 
 nvm_process_parameters() {
